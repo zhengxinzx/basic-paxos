@@ -51,6 +51,14 @@ type AcceptorClient struct {
 	c *rpc.Client
 }
 
+func NewAcceptorClient(addr string) (*AcceptorClient, error) {
+	c, err := rpc.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	return &AcceptorClient{c: c}, nil
+}
+
 func (c *AcceptorClient) SendPrepareRequest(req PrepareRequest) (PrepareResponse, error) {
 	var res PrepareResponse
 	err := c.c.Call("Acceptor.Prepare", req, &res)

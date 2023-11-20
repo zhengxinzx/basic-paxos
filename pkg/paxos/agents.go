@@ -3,6 +3,8 @@ package paxos
 import (
 	"log"
 	"math/rand"
+	"net"
+	"net/rpc"
 	"sync"
 )
 
@@ -22,6 +24,21 @@ type Proposer struct {
 
 	// RPC clients to connect to acceptor
 	clients []*AcceptorClient
+}
+
+func NewProposer(proposerID int, acceptorAddr []string) *Proposer {
+	clients := make([]*AcceptorClient, len(acceptorAddr))
+	for i, addr := range acceptorAddr {
+		c, err := NewAcceptorClient(addr)
+		if err != nil {
+			log.Fatalf("Proposer %v: Error creating AcceptorClient for addr %v: %v.\n", proposerID, addr, err)
+		}
+		clients[i] = c
+	}
+	return &Proposer{
+		proposerID: proposerID,
+		clients:    clients,
+	}
 }
 
 // Select clients for acceptor. The number of clients returned by this function is guaranteed to be a majority of acceptors.
@@ -50,7 +67,7 @@ func (p *Proposer) selectMajorityAcceptorClients() []*AcceptorClient {
 func (p *Proposer) majorityAcceptorCount() int {
 	length := len(p.clients)
 	if length == 0 {
-		log.Panicf("Proposer %v: Configuration error: No acceptors available.", p.proposerID)
+		log.Fatalf("Proposer %v: Configuration error: No acceptors available.", p.proposerID)
 	}
 	return length/2 + 1
 }
@@ -214,13 +231,35 @@ func (p *Proposer) Propose() {
 // Acceptor
 type Acceptor struct {
 	sync.Mutex
+
 	name string
+	port string
 
 	maxRespondedProposalNumber ProposalNumber
 	acceptedProposalNumber     ProposalNumber
 	acceptedProposalValue      ProposalValue
 
 	accepted bool
+}
+
+func NewAcceptor(name, port string) *Acceptor {
+	return &Acceptor{
+		name: name,
+		port: port,
+	}
+}
+
+func (a *Acceptor) Run() {
+	rpc.RegisterName("Acceptor", a)
+	listener, err := net.Listen("tcp", a.port)
+	if err != nil {
+		log.Fatalf("Acceptor %v: Error listening on port %v: %v.\n", a, a.port, err)
+	}
+	conn, err := listener.Accept()
+	if err != nil {
+		log.Fatalf("Acceptor %v: Error accepting connection: %v.\n", a, err)
+	}
+	rpc.ServeConn(conn)
 }
 
 // Prepare is the phase 1.b of the Paxos algorithm.
