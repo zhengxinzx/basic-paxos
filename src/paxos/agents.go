@@ -57,6 +57,8 @@ func (p *Proposer) majorityAcceptorCount() int {
 
 // Prepare is the phase 1.a of the Paxos algorithm.
 func (p *Proposer) Prepare(proposalNumber ProposalNumber, proposalValue ProposalValue) (bool, ProposalNumber, ProposalValue) {
+	log.Printf("Proposer %v: Phase 1.a (Prepare) start with proposal %v (%s).\n", p.proposerID, proposalNumber, proposalValue)
+
 	// Select majority acceptors
 	clients := p.selectMajorityAcceptorClients()
 
@@ -110,10 +112,16 @@ func (p *Proposer) Prepare(proposalNumber ProposalNumber, proposalValue Proposal
 		}
 	}
 
-	return promisedCount >= p.majorityAcceptorCount(), acceptedProposalNumber, acceptedProposalValue
+	promised := promisedCount >= p.majorityAcceptorCount()
+
+	log.Printf("Proposer %v: Phase 1.a (Prepare) end with proposal %v (%s) being promised: %v.\n", p.proposerID, acceptedProposalNumber, acceptedProposalValue, promised)
+
+	return promised, acceptedProposalNumber, acceptedProposalValue
 }
 
 func (p *Proposer) Accept(proposedNumber ProposalNumber, proposedValue ProposalValue) bool {
+	log.Printf("Proposer %v: Phase 2.a (Accept) start with proposal %v (%s).\n", p.proposerID, proposedNumber, proposedValue)
+
 	// Select majority acceptors
 	clients := p.selectMajorityAcceptorClients()
 
@@ -157,10 +165,10 @@ func (p *Proposer) Accept(proposedNumber ProposalNumber, proposedValue ProposalV
 			acceptedCount++
 		}
 	}
-	if acceptedCount >= p.majorityAcceptorCount() {
-		return true
-	}
-	return false
+
+	accepted := acceptedCount >= p.majorityAcceptorCount()
+	log.Printf("Proposer %v: Phase 2.a (Accept) end with proposal %v (%s) being accepted: %v.\n", p.proposerID, proposedNumber, proposedValue, accepted)
+	return accepted
 }
 
 // Propose starts the propose stage.
@@ -169,14 +177,14 @@ func (p *Proposer) Propose() {
 		// Initial setup stage
 		// Increment proposal id
 		p.proposalID++
-		log.Printf("Proposer %v: Starting Propose stage with proposal %v (%s).\n", p.proposerID, p.proposalID, p.proposalValue)
 
 		// Create proposal number used in this round
 		proposalNumber := ProposalNumber{
 			ProposalId: p.proposalID,
 			ProposerId: p.proposerID,
 		}
-		log.Printf("Proposer %v: Proposal number for this round is %v.\n", p.proposerID, proposalNumber)
+
+		log.Printf("Proposer %v: Starting Propose stage with proposal %v (%s).\n", p.proposerID, proposalNumber, p.proposalValue)
 
 		// Phase 1.a Prepare
 		promised, acceptedProposalNumber, acceptedProposalValue := p.Prepare(proposalNumber, p.proposalValue)
@@ -206,6 +214,7 @@ func (p *Proposer) Propose() {
 // Acceptor
 type Acceptor struct {
 	sync.Mutex
+	name string
 
 	maxRespondedProposalNumber ProposalNumber
 	acceptedProposalNumber     ProposalNumber
@@ -219,6 +228,7 @@ func (a *Acceptor) Prepare(req PrepareRequest, res *PrepareResponse) error {
 	a.Lock()
 	defer a.Unlock()
 
+	log.Printf("Acceptor %v: Phase 1.b (Prepare) start with prepare request %v.\n", a, req)
 	res = &PrepareResponse{}
 	// If the proposal number is the greatest seen so far, then promise not to accept any more proposals
 	if req.ProposalNumber.Lt(a.maxRespondedProposalNumber) {
@@ -235,11 +245,15 @@ func (a *Acceptor) Prepare(req PrepareRequest, res *PrepareResponse) error {
 	} else {
 		res.Ok = false
 	}
+
+	log.Printf("Acceptor %v: Phase 1.b (Prepare) end with prepare response %v.\n", a, res)
 	return nil
 }
 
 // Accept is the phase 2.b of the Paxos algorithm.
 func (a *Acceptor) Accept(req AcceptRequest, res *AcceptResponse) error {
+	log.Printf("Acceptor %v: Phase 2.b (Accept) start with accept request %v.\n", a, req)
+
 	a.Lock()
 	defer a.Unlock()
 
@@ -257,5 +271,7 @@ func (a *Acceptor) Accept(req AcceptRequest, res *AcceptResponse) error {
 		a.acceptedProposalValue = req.ProposalValue
 		res = &AcceptResponse{Ok: true}
 	}
+
+	log.Printf("Acceptor %v: Phase 2.b (Accept) end with accept response %v.\n", a, res)
 	return nil
 }
