@@ -69,6 +69,7 @@ func (p *Proposer) Prepare(proposalNumber ProposalNumber, proposalValue Proposal
 	for _, client := range clients {
 		client := client
 		go func() {
+			defer wg.Done()
 			req := PrepareRequest{ProposalNumber: proposalNumber}
 			res, err := client.SendPrepareRequest(req)
 			if err != nil {
@@ -93,23 +94,23 @@ func (p *Proposer) Prepare(proposalNumber ProposalNumber, proposalValue Proposal
 	}
 
 	// Check if received OK from a majority of acceptors?
-	promised := true
-	acceptedProposalNumber := proposalNumber.ProposalId
+	promisedCount := 0
+	acceptedProposalNumber := proposalNumber
 	acceptedProposalValue := proposalValue
 	for _, res := range responses {
 		// select the highest proposal ID
-		if res.ProposalNumber.ProposalId > acceptedProposalNumber {
-			acceptedProposalNumber = res.ProposalNumber.ProposalId
+
+		if res.ProposalNumber.Lt(acceptedProposalNumber) {
+			acceptedProposalNumber = res.ProposalNumber
 			acceptedProposalValue = res.ProposalValue
 		}
 
-		// If any of the acceptors did not promise, then the proposal is not promised
 		if !res.Ok {
-			promised = false
+			promisedCount++
 		}
 	}
 
-	return promised, ProposalNumber{ProposalId: acceptedProposalNumber, ProposerId: proposalNumber.ProposerId}, acceptedProposalValue
+	return promisedCount >= p.majorityAcceptorCount(), acceptedProposalNumber, acceptedProposalValue
 }
 
 func (p *Proposer) Accept(proposedNumber ProposalNumber, proposedValue ProposalValue) bool {
@@ -125,6 +126,7 @@ func (p *Proposer) Accept(proposedNumber ProposalNumber, proposedValue ProposalV
 	for _, client := range clients {
 		client := client
 		go func() {
+			defer wg.Done()
 			req := AcceptRequest{ProposalNumber: proposedNumber, ProposalValue: proposedValue}
 			res, err := client.SendAcceptRequest(req)
 			if err != nil {
@@ -203,6 +205,8 @@ func (p *Proposer) Propose() {
 
 // Acceptor
 type Acceptor struct {
+	sync.Mutex
+
 	maxRespondedProposalNumber ProposalNumber
 	acceptedProposalNumber     ProposalNumber
 	acceptedProposalValue      ProposalValue
@@ -212,6 +216,9 @@ type Acceptor struct {
 
 // Prepare is the phase 1.b of the Paxos algorithm.
 func (a *Acceptor) Prepare(req PrepareRequest, res *PrepareResponse) error {
+	a.Lock()
+	defer a.Unlock()
+
 	res = &PrepareResponse{}
 	// If the proposal number is the greatest seen so far, then promise not to accept any more proposals
 	if req.ProposalNumber.Lt(a.maxRespondedProposalNumber) {
@@ -233,6 +240,9 @@ func (a *Acceptor) Prepare(req PrepareRequest, res *PrepareResponse) error {
 
 // Accept is the phase 2.b of the Paxos algorithm.
 func (a *Acceptor) Accept(req AcceptRequest, res *AcceptResponse) error {
+	a.Lock()
+	defer a.Unlock()
+
 	res = &AcceptResponse{}
 	// If acceptor has already responded to a prepare request having a number greater than n.
 	if a.maxRespondedProposalNumber.Lt(req.ProposalNumber) {
